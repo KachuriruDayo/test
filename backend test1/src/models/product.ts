@@ -1,5 +1,5 @@
 import { unlink } from 'fs'
-import mongoose, { Document } from 'mongoose'
+import mongoose, {Document, Types} from 'mongoose'
 import { join } from 'path'
 
 export interface IFile {
@@ -8,6 +8,7 @@ export interface IFile {
 }
 
 export interface IProduct extends Document {
+    _id: Types.ObjectId
     title: string
     image: IFile
     category: string
@@ -48,6 +49,7 @@ const cardsSchema = new mongoose.Schema<IProduct>(
 
 cardsSchema.index({ title: 'text' })
 
+// Можно лучше: удалять старое изображением перед обновлением сущности
 cardsSchema.pre('findOneAndUpdate', async function deleteOldImage() {
     // @ts-ignore
     const updateImage = this.getUpdate().$set?.image
@@ -60,6 +62,7 @@ cardsSchema.pre('findOneAndUpdate', async function deleteOldImage() {
     }
 })
 
+// Можно лучше: удалять файл с изображением после удаление сущности
 cardsSchema.post('findOneAndDelete', async (doc: IProduct) => {
     unlink(join(__dirname, `../public/${doc.image.fileName}`), (err) =>
         console.log(err)

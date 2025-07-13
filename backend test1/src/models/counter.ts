@@ -8,8 +8,6 @@ const counterSchema = new Schema<ICounter>({
     sequenceValue: {
         type: Number,
         required: true,
-        min: 0,
-        max: Number.MAX_SAFE_INTEGER,
     },
 })
 

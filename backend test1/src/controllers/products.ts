@@ -1,8 +1,7 @@
 import { NextFunction, Request, Response } from 'express'
 import { constants } from 'http2'
 import { Error as MongooseError } from 'mongoose'
-import { join, basename } from 'path'
-import { escape } from 'validator'
+import { join } from 'path'
 import BadRequestError from '../errors/bad-request-error'
 import ConflictError from '../errors/conflict-error'
 import NotFoundError from '../errors/not-found-error'
@@ -20,7 +19,6 @@ const getProducts = async (req: Request, res: Response, next: NextFunction) => {
         const products = await Product.find({}, null, options)
         const totalProducts = await Product.countDocuments({})
         const totalPages = Math.ceil(totalProducts / Number(limit))
-
         return res.send({
             items: products,
             pagination: {
@@ -42,27 +40,24 @@ const createProduct = async (
     next: NextFunction
 ) => {
     try {
-        let { title, description, category } = req.body
-        const { price, image } = req.body
-
-        title = escape(String(title)).slice(0, 100)
-        description = escape(String(description)).slice(0, 1000)
-        category = escape(String(category)).slice(0, 50)
-
-        if (image && image.fileName) {
-            image.originalName = basename(image.fileName)
-            image.fileName = `/${process.env.UPLOAD_PATH}/${basename(image.fileName)}`
-
-            movingFile(
-                image.originalName,
+        const { description, category, price, title, image } = req.body
+        
+        if (image) {
+            await movingFile(
+                image.fileName,
                 join(__dirname, `../public/${process.env.UPLOAD_PATH_TEMP}`),
                 join(__dirname, `../public/${process.env.UPLOAD_PATH}`)
             )
         }
 
+        const imageObj = {
+            fileName: `/${process.env.UPLOAD_PATH || 'images'}/${image.fileName}`,
+            originalName: image.originalName,
+        };
+
         const product = await Product.create({
             description,
-            image,
+            image: imageObj,
             category,
             price,
             title,
@@ -81,6 +76,7 @@ const createProduct = async (
     }
 }
 
+// TODO: Добавить guard admin
 // PUT /product
 const updateProduct = async (
     req: Request,
@@ -89,35 +85,29 @@ const updateProduct = async (
 ) => {
     try {
         const { productId } = req.params
-        if (typeof productId !== 'string') {
-            return next(new BadRequestError('Неверный формат ID'))
-        }
-
-        const updateData = {
-            ...req.body,
-            title: escape(String(req.body.title ?? '')).slice(0, 100),
-            description: escape(String(req.body.description ?? '')).slice(0, 1000),
-            category: escape(String(req.body.category ?? '')).slice(0, 50),
-            price: req.body.price ?? null,
-        }
-
-        if (req.body.image && req.body.image.fileName) {
-            const safeFileName = basename(req.body.image.fileName)
-            updateData.image = { ...req.body.image, fileName: safeFileName }
-
-            movingFile(
-                safeFileName,
+        const { image } = req.body
+        
+        if (image) {
+            await movingFile(
+                image.fileName,
                 join(__dirname, `../public/${process.env.UPLOAD_PATH_TEMP}`),
                 join(__dirname, `../public/${process.env.UPLOAD_PATH}`)
             )
         }
 
+        image.fileName = `/${process.env.UPLOAD_PATH || 'images'}/${image.fileName}`;
+
         const product = await Product.findByIdAndUpdate(
             productId,
-            { $set: updateData },
+            {
+                $set: {
+                    ...req.body,
+                    price: req.body.price ? req.body.price : null,
+                    image: req.body.image ? req.body.image : undefined,
+                },
+            },
             { runValidators: true, new: true }
         ).orFail(() => new NotFoundError('Нет товара по заданному id'))
-
         return res.send(product)
     } catch (error) {
         if (error instanceof MongooseError.ValidationError) {
@@ -135,6 +125,7 @@ const updateProduct = async (
     }
 }
 
+// TODO: Добавить guard admin
 // DELETE /product
 const deleteProduct = async (
     req: Request,
@@ -143,14 +134,9 @@ const deleteProduct = async (
 ) => {
     try {
         const { productId } = req.params
-        if (typeof productId !== 'string') {
-            return next(new BadRequestError('Неверный формат ID'))
-        }
-
         const product = await Product.findByIdAndDelete(productId).orFail(
             () => new NotFoundError('Нет товара по заданному id')
         )
-
         return res.send(product)
     } catch (error) {
         if (error instanceof MongooseError.CastError) {

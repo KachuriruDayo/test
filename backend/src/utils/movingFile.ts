@@ -1,25 +1,19 @@
-import { promises as fs } from 'fs';
-import { basename, join } from 'path';
+import { existsSync, rename } from 'fs'
+import { basename, join } from 'path'
 
-async function movingFile(imagePath: string, from: string, to: string): Promise<void> {
-    const fileName = basename(imagePath);
-    console.log(`Found ${fileName}`);
-    const imagePathTemp = join(from, fileName);
-    console.log(`Found ${imagePathTemp}`);
-    const imagePathPermanent = join(to, fileName);
-    console.log(`Found ${imagePathPermanent}`);
-
-    try {
-        await fs.access(imagePathTemp);
-    } catch {
-        throw new Error('Ошибка при сохранении файла: файл не найден');
+function movingFile(imagePath: string, from: string, to: string) {
+    const fileName = basename(imagePath)
+    const imagePathTemp = join(from, fileName)
+    const imagePathPermanent = join(to, fileName)
+    if (!existsSync(imagePathTemp)) {
+        throw new Error('Ошибка при сохранении файла')
     }
 
-    try {
-        await fs.rename(imagePathTemp, imagePathPermanent);
-    } catch {
-        throw new Error('Ошибка при сохранении файла: не удалось переместить файл');
-    }
+    rename(imagePathTemp, imagePathPermanent, (err) => {
+        if (err) {
+            throw new Error('Ошибка при сохранении файла')
+        }
+    })
 }
 
-export default movingFile;
+export default movingFile
