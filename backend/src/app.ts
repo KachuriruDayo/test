@@ -5,7 +5,6 @@ import 'dotenv/config'
 import express, { json, urlencoded } from 'express'
 import mongoose from 'mongoose'
 import path from 'path'
-import mongoSanitize from 'express-mongo-sanitize';
 import rateLimit from 'express-rate-limit';
 import helmet from "helmet";
 import { DB_ADDRESS } from './config'
@@ -57,8 +56,6 @@ app.use(cookieParser())
 app.use(globalLimiter);
 
 app.options('*', cors());
-
-app.use(mongoSanitize());
 
 app.use(routes)
 app.use(errors())
