@@ -2,6 +2,7 @@ import { errors } from 'celebrate'
 import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import 'dotenv/config'
+import fs from 'fs';
 import express, { json, urlencoded } from 'express'
 import mongoose from 'mongoose'
 import path from 'path'
@@ -22,6 +23,12 @@ const globalLimiter = rateLimit({
 
 const { PORT = 3000 } = process.env
 const app = express()
+
+const tempDir = path.join(__dirname, 'public', process.env.UPLOAD_PATH_TEMP || 'temp');
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
+  console.log(`Папка создана: ${tempDir}`);
+}
 
 app.use(helmet({
     contentSecurityPolicy: {
