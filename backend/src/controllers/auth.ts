@@ -3,7 +3,6 @@ import { NextFunction, Request, Response } from 'express'
 import { constants } from 'http2'
 import jwt, { JwtPayload } from 'jsonwebtoken'
 import { Error as MongooseError } from 'mongoose'
-
 import { REFRESH_TOKEN } from '../config'
 import BadRequestError from '../errors/bad-request-error'
 import ConflictError from '../errors/conflict-error'
@@ -18,25 +17,19 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
         const user = await User.findUserByCredentials(email, password)
         const accessToken = user.generateAccessToken()
         const refreshToken = await user.generateRefreshToken()
-
         res.cookie(
             REFRESH_TOKEN.cookie.name,
             refreshToken,
             REFRESH_TOKEN.cookie.options
         )
-
-        res.json({
+        
+        return res.json({
             success: true,
-            user: {
-                _id: user._id,
-                email: user.email,
-                name: user.name,
-                roles: user.roles,
-            },
+            user,
             accessToken,
         })
     } catch (err) {
-        next(err)
+        return next(err)
     }
 }
 
@@ -44,25 +37,19 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
 const register = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { email, password, name } = req.body
-        const user = await new User({ email, password, name }).save()
-
-        const accessToken = user.generateAccessToken()
-        const refreshToken = await user.generateRefreshToken()
+        const newUser = new User({ email, password, name })
+        await newUser.save()
+        const accessToken = newUser.generateAccessToken()
+        const refreshToken = await newUser.generateRefreshToken()
 
         res.cookie(
             REFRESH_TOKEN.cookie.name,
             refreshToken,
             REFRESH_TOKEN.cookie.options
         )
-
-        res.status(constants.HTTP_STATUS_CREATED).json({
+        return res.status(constants.HTTP_STATUS_CREATED).json({
             success: true,
-            user: {
-                _id: user._id,
-                email: user.email,
-                name: user.name,
-                roles: user.roles,
-            },
+            user: newUser,
             accessToken,
         })
     } catch (error) {
@@ -79,28 +66,26 @@ const register = async (req: Request, res: Response, next: NextFunction) => {
 }
 
 // GET /auth/user
-const getCurrentUser = async (_req: Request, res: Response, next: NextFunction) => {
+const getCurrentUser = async (
+    _req: Request,
+    res: Response,
+    next: NextFunction
+) => {
     try {
         const userId = res.locals.user._id
         const user = await User.findById(userId).orFail(
-            () => new NotFoundError('Пользователь по заданному id отсутствует в базе')
+            () =>
+                new NotFoundError(
+                    'Пользователь по заданному id отсутствует в базе'
+                )
         )
-
-        res.json({
-            success: true,
-            user: {
-                _id: user._id,
-                email: user.email,
-                name: user.name,
-                roles: user.roles,
-            },
-        })
+        res.json({ user, success: true })
     } catch (error) {
         next(error)
     }
 }
 
-// Логика удаления refresh токена из пользователя
+// Можно лучше: вынести общую логику получения данных из refresh токена
 const deleteRefreshTokenInUser = async (
     req: Request,
     _res: Response,
@@ -113,11 +98,13 @@ const deleteRefreshTokenInUser = async (
         throw new UnauthorizedError('Не валидный токен')
     }
 
-    const decoded = jwt.verify(rfTkn, REFRESH_TOKEN.secret) as JwtPayload
-
-    const user = await User.findOne({ _id: decoded._id }).orFail(() =>
-        new UnauthorizedError('Пользователь не найден в базе')
-    )
+    const decodedRefreshTkn = jwt.verify(
+        rfTkn,
+        REFRESH_TOKEN.secret
+    ) as JwtPayload
+    const user = await User.findOne({
+        _id: decodedRefreshTkn._id,
+    }).orFail(() => new UnauthorizedError('Пользователь не найден в базе'))
 
     const rTknHash = crypto
         .createHmac('sha256', REFRESH_TOKEN.secret)
@@ -125,69 +112,73 @@ const deleteRefreshTokenInUser = async (
         .digest('hex')
 
     user.tokens = user.tokens.filter((tokenObj) => tokenObj.token !== rTknHash)
+
     await user.save()
 
     return user
 }
 
-// GET /auth/logout
+// Реализация удаления токена из базы может отличаться
+// GET  /auth/logout
 const logout = async (req: Request, res: Response, next: NextFunction) => {
     try {
         await deleteRefreshTokenInUser(req, res, next)
-
-        res.cookie(REFRESH_TOKEN.cookie.name, '', {
+        const expireCookieOptions = {
             ...REFRESH_TOKEN.cookie.options,
             maxAge: -1,
+        }
+        res.cookie(REFRESH_TOKEN.cookie.name, '', expireCookieOptions)
+        res.status(200).json({
+            success: true,
         })
-
-        res.status(200).json({ success: true })
     } catch (error) {
         next(error)
     }
 }
 
-// POST /auth/token
+// GET  /auth/token
 const refreshAccessToken = async (
     req: Request,
     res: Response,
     next: NextFunction
 ) => {
     try {
-        const user = await deleteRefreshTokenInUser(req, res, next)
-        const accessToken = user.generateAccessToken()
-        const refreshToken = await user.generateRefreshToken()
-
+        const userWithRefreshTkn = await deleteRefreshTokenInUser(
+            req,
+            res,
+            next
+        )
+        const accessToken = await userWithRefreshTkn.generateAccessToken()
+        const refreshToken = await userWithRefreshTkn.generateRefreshToken()
         res.cookie(
             REFRESH_TOKEN.cookie.name,
             refreshToken,
             REFRESH_TOKEN.cookie.options
         )
-
-        res.json({
+        return res.json({
             success: true,
-            user: {
-                _id: user._id,
-                email: user.email,
-                name: user.name,
-                roles: user.roles,
-            },
+            user: userWithRefreshTkn,
             accessToken,
         })
     } catch (error) {
-        next(error)
+        return next(error)
     }
 }
 
-// GET /auth/user/roles
 const getCurrentUserRoles = async (
-    _req: Request,
+    req: Request,
     res: Response,
     next: NextFunction
 ) => {
+    const userId = res.locals.user._id
     try {
-        const userId = res.locals.user._id
-        await User.findById(userId).orFail(
-            () => new NotFoundError('Пользователь по заданному id отсутствует в базе')
+        await User.findById(userId, req.body, {
+            new: true,
+        }).orFail(
+            () =>
+                new NotFoundError(
+                    'Пользователь по заданному id отсутствует в базе'
+                )
         )
         res.status(200).json(res.locals.user.roles)
     } catch (error) {
@@ -195,42 +186,33 @@ const getCurrentUserRoles = async (
     }
 }
 
-// PATCH /auth/user
 const updateCurrentUser = async (
     req: Request,
     res: Response,
     next: NextFunction
 ) => {
     const userId = res.locals.user._id
-    const name = typeof req.body.name === 'string' ? req.body.name : undefined
-    const email = typeof req.body.email === 'string' ? req.body.email : undefined
-
     try {
-        const updatedUser = await User.findByIdAndUpdate(
-            userId,
-            { name, email },
-            { new: true, runValidators: true }
-        ).orFail(() =>
-            new NotFoundError('Пользователь по заданному id отсутствует в базе')
+        const updatedUser = await User.findByIdAndUpdate(userId, req.body, {
+            new: true,
+        }).orFail(
+            () =>
+                new NotFoundError(
+                    'Пользователь по заданному id отсутствует в базе'
+                )
         )
-
-        res.status(200).json({
-            _id: updatedUser._id,
-            email: updatedUser.email,
-            name: updatedUser.name,
-            roles: updatedUser.roles,
-        })
+        res.status(200).json(updatedUser)
     } catch (error) {
         next(error)
     }
 }
 
 export {
-    login,
-    register,
-    logout,
-    refreshAccessToken,
     getCurrentUser,
     getCurrentUserRoles,
+    login,
+    logout,
+    refreshAccessToken,
+    register,
     updateCurrentUser,
 }

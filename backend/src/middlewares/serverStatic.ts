@@ -1,35 +1,52 @@
-import { NextFunction, Request, Response } from 'express'
-import fs from 'fs'
-import path from 'path'
+import { NextFunction, Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 
 export default function serveStatic(baseDir: string) {
+    const absBaseDir = path.resolve(baseDir);
+
     return (req: Request, res: Response, next: NextFunction) => {
         try {
-            const safePath = decodeURIComponent(req.path.replace(/\0/g, ''))
+            // Декодируем URI, удаляем нулевые байты
+            const safePath = decodeURIComponent(req.path.replace(/\0/g, ''));
 
+            // Явная проверка на попытку Path Traversal
             if (safePath.includes('..')) {
-                return res.status(403).send({ message: 'Доступ запрещён' })
+                console.warn(`[serveStatic] Path Traversal attempt: ${safePath}`);
+                return res.status(403).json({ message: 'Доступ запрещён' });
             }
 
-            const resolvedPath = path.resolve(baseDir, `.${  safePath}`)
+            // Формируем абсолютный путь к файлу
+            const filePath = path.resolve(absBaseDir, `.${safePath}`);
 
-            if (!resolvedPath.startsWith(path.resolve(baseDir))) {
-                return res.status(403).send({ message: 'Доступ запрещён' })
+            // Проверяем, что файл лежит внутри базовой директории
+            if (!filePath.startsWith(absBaseDir)) {
+                console.warn(`[serveStatic] Path Traversal attempt: ${filePath}`);
+                return res.status(403).json({ message: 'Доступ запрещён' });
             }
 
-            fs.access(resolvedPath, fs.constants.F_OK, (err) => {
+            // Проверяем, что файл существует и это именно файл (а не директория)
+            fs.stat(filePath, (err, stats) => {
                 if (err) {
-                    return next()
+                    // Файл не найден — передаём управление дальше
+                    return next();
                 }
 
-                return res.sendFile(resolvedPath, (error) => {
-                    if (error) {
-                        next(error)
+                if (!stats.isFile()) {
+                    // Если это не файл — тоже передаём дальше
+                    return next();
+                }
+
+                // Отдаём файл клиенту
+                res.sendFile(filePath, (err) => {
+                    if (err) {
+                        next(err);
                     }
-                })
-            })
+                });
+            });
         } catch (error) {
-            return next(error)
+            // Ловим синхронные ошибки
+            next(error);
         }
-    }
+    };
 }
