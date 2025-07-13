@@ -326,7 +326,7 @@ export const createOrder = async (
         }
 
         // Нормализация телефона с проверкой
-        const normalizedPhone = normalizePhone(phone, 'RU')
+        const normalizedPhone = phone.replace(/\D/g, '');
         if (!normalizedPhone) {
             return next(new BadRequestError('Некорректный номер телефона'))
         }
@@ -342,7 +342,7 @@ export const createOrder = async (
             payment: sanitizeAndTrim(payment, 50),
             phone: normalizedPhone,
             email: sanitizeAndTrim(email, 100),
-            comment: sanitizeAndTrim(comment, 200),
+            comment: sanitizeAndTrim(comment, 1000),
             customer: userId,
             deliveryAddress: sanitizeAndTrim(address, 200),
         })
