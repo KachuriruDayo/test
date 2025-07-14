@@ -27,7 +27,6 @@ const app = express()
 const tempDir = path.join(__dirname, 'public', process.env.UPLOAD_PATH_TEMP || 'temp');
 if (!fs.existsSync(tempDir)) {
   fs.mkdirSync(tempDir, { recursive: true });
-  console.log(`Папка создана: ${tempDir}`);
 }
 
 app.use(helmet({
@@ -41,7 +40,7 @@ app.use(helmet({
 app.set('trust proxy', 1)
 
 app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: process.env.ORIGIN_ALLOW,
     credentials: true,
 }))
 
