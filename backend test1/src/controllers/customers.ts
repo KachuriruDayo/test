@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { FilterQuery, Types } from 'mongoose'
+import escapeRegExp from '../utils/escapeRegExp'
 import NotFoundError from '../errors/not-found-error'
 import Order from '../models/order'
 import User, { IUser } from '../models/user'
@@ -16,10 +17,6 @@ function sanitizeObject(obj: any): any {
         cleanObj[key] = sanitizeObject(obj[key]);
     });
     return cleanObj;
-}
-
-function escapeRegex(text: string): string {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function isValidObjectId(id: string): boolean {
@@ -89,7 +86,7 @@ export const getCustomers = async (
         }
 
         if (search && typeof search === 'string' && search.length <= 50) {
-            const safeSearch = escapeRegex(search)
+            const safeSearch = escapeRegExp(search)
             const searchRegex = new RegExp(safeSearch, 'i')
 
             const orders = await Order.find(
