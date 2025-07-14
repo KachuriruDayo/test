@@ -153,57 +153,74 @@ export const getOrders = async (
     req: Request,
     res: Response,
     next: NextFunction
-  ) => {
+) => {
     try {
-      const userId = res.locals.user._id
-      const { search, page = 1, limit = 5 } = req.query
-      const safeLimit = Math.min(Number(limit), 10)
-      const skip = (Number(page) - 1) * safeLimit
-  
-      const user = await User.findById(userId)
-        .populate({
-          path: 'orders',
-          populate: [{ path: 'products' }, { path: 'customer' }],
+        const userId = res.locals.user._id
+        const { search, page = '1', limit = '5' } = req.query
+
+        const normalizedLimit = normalizeLimit(limit, 5)
+        const currentPage = Math.max(1, parseInt(page as string, 10) || 1)
+        const skip = (currentPage - 1) * normalizedLimit
+
+        const user = await User.findById(userId)
+            .populate({
+                path: 'orders',
+                populate: ['products', 'customer'],
+            })
+            .orFail(() => new NotFoundError('Пользователь по заданному id отсутствует в базе'))
+
+        let orders = user.orders as unknown as IOrder[]
+
+        if (typeof search === 'string' && search.length > 0) {
+            if (search.length > 100) {
+                throw new BadRequestError('Поисковый запрос слишком длинный')
+            }
+
+            const safeSearch = escapeRegExp(search)
+            const searchRegex = new RegExp(safeSearch, 'i')
+
+            // Попытка парсинга числа для поиска по orderNumber и цене
+            const searchNumber = Number(search)
+            const hasValidNumber = !Number.isNaN(searchNumber)
+
+            // Формируем фильтр по товарам
+            const productQuery: any = { title: searchRegex }
+            if (hasValidNumber) {
+                productQuery.$or = [{ title: searchRegex }, { price: searchNumber }]
+            }
+
+            // Ограничиваем максимум 50 для предотвращения тяжелых запросов
+            const products = await Product.find(productQuery).limit(50)
+            const productIdsSet = new Set(products.map(p => p._id.toString()))
+
+            orders = orders.filter(order => {
+                const matchesProductTitle = order.products.some(product =>
+                    productIdsSet.has(product._id.toString())
+                )
+                const matchesOrderNumber = hasValidNumber && order.orderNumber === searchNumber
+                return matchesOrderNumber || matchesProductTitle
+            })
+        }
+
+        const totalOrders = orders.length
+        const totalPages = Math.ceil(totalOrders / normalizedLimit)
+
+        // Пагинация по отфильтрованному списку
+        const paginatedOrders = orders.slice(skip, skip + normalizedLimit)
+
+        return res.status(200).json({
+            orders: paginatedOrders,
+            pagination: {
+                totalOrders,
+                totalPages,
+                currentPage,
+                pageSize: normalizedLimit,
+            },
         })
-        .orFail(() => new NotFoundError('Пользователь не найден'))
-  
-      let orders = user.orders as unknown as IOrder[]
-  
-      const isSafe = typeof search === 'string' && search.length < 100 && /^[\wа-яА-ЯёЁ0-9\s\-.,]+$/.test(search)
-  
-      if (search && isSafe) {
-        const searchRegex = new RegExp(search, 'i')
-        const searchNumber = Number(search)
-        const products = await Product.find({ title: searchRegex })
-        const productIds: Types.ObjectId[] = products.map((p) => p._id as Types.ObjectId)
-  
-        orders = orders.filter((order) => {
-          const matchesTitle = order.products.some((p) =>
-            productIds.some((id) => (p._id as Types.ObjectId).equals(id))
-          )
-          const matchesNumber =
-            !Number.isNaN(searchNumber) && order.orderNumber === searchNumber
-          return matchesTitle || matchesNumber
-        })
-      }
-  
-      const totalOrders = orders.length
-      const totalPages = Math.ceil(totalOrders / safeLimit)
-      orders = orders.slice(skip, skip + safeLimit)
-  
-      return res.status(200).json({
-        orders,
-        pagination: {
-          totalOrders,
-          totalPages,
-          currentPage: Number(page),
-          pageSize: safeLimit,
-        },
-      })
     } catch (error) {
-      next(error)
+        next(error)
     }
-  }
+}
   
   
 export const getOrderByNumber = async (
