@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { FilterQuery, Types } from 'mongoose'
-import BadRequestError from '../errors/bad-request-error'
+import escapeRegExp from '../utils/escapeRegExp'
 import NotFoundError from '../errors/not-found-error'
 import Order from '../models/order'
 import User, { IUser } from '../models/user'
@@ -87,12 +87,8 @@ export const getCustomers = async (
 
         // Безопасный RegExp поиск
         if (search && typeof search === 'string' && search.length <= 50) {
-            let searchRegex: RegExp;
-            try {
-                searchRegex = new RegExp(search, 'i');
-            } catch {
-                throw new BadRequestError('Некорректный поисковый запрос');
-            }
+            const safeSearch = escapeRegExp(search)
+            const searchRegex = new RegExp(safeSearch, 'i')
 
             const orders = await Order.find(
                 { $or: [{ deliveryAddress: searchRegex }] },
