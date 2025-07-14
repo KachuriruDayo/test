@@ -87,21 +87,19 @@ export const getCustomers = async (
         }
 
         // Поиск по имени и заказам
-        if (search) {
-            if (typeof search === 'string' && search.length <= 50) {
-                const safeSearch = escapeRegExp(search);
-                const searchRegex = new RegExp(safeSearch, 'i');
+        if (search && typeof search === 'string' && search.length <= 50) {
+            const safeSearch = escapeRegExp(search);
+            const searchRegex = new RegExp(safeSearch, 'i');
 
-                const orders = await Order.find({ deliveryAddress: searchRegex }, '_id').exec();
-                const orderIds = orders.map((order) => order._id);
+            const orders = await Order.find({ deliveryAddress: searchRegex }, '_id').exec();
+            const orderIds = orders.map((order) => order._id);
 
-                filters.$or = [
-                    { name: searchRegex },
-                    { lastOrder: { $in: orderIds } },
-                ];
-            } else {
-                return next(new NotFoundError('Недопустимый параметр поиска'));
-            }
+            filters.$or = [
+                { name: searchRegex },
+                { lastOrder: { $in: orderIds } },
+            ];
+        } else {
+            return next(new NotFoundError('Недопустимый параметр поиска'));
         }
 
         // Сортировка
