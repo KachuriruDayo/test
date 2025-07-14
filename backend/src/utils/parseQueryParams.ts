@@ -103,7 +103,6 @@ const sanitizeSearch = (value?: string): string | undefined => {
     if (trimmed.length === 0) return undefined;
     const allowedPattern = /^[a-zA-Z0-9\s\-_.]+$/;
     if (!allowedPattern.test(trimmed)) throw new BadRequestError("Поисковый запрос содержит недопустимые символы");
-    // Экранирование спецсимволов для RegExp
     return trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 

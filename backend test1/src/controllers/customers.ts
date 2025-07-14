@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { FilterQuery, Types } from 'mongoose'
+import BadRequestError from '../errors/bad-request-error'
 import NotFoundError from '../errors/not-found-error'
 import Order from '../models/order'
 import User, { IUser } from '../models/user'
@@ -29,10 +30,8 @@ export const getCustomers = async (
     next: NextFunction
 ) => {
     try {
-        // Санитизируем query
         const sanitizedObject = sanitizeObject(req.query);
 
-        // Нормализуем параметры с дополнительной валидацией
         const {
             page,
             limit,
@@ -49,11 +48,9 @@ export const getCustomers = async (
             search,
         } = normalizeCustomerQueryParams(sanitizedObject, 10);
 
-        // Проверка sortField на разрешённые поля
         const allowedSortFields = ['createdAt', 'totalAmount', 'orderCount', 'name'];
         const safeSortField = allowedSortFields.includes(sortField) ? sortField : 'createdAt';
 
-        // Формируем фильтры
         const filters: FilterQuery<Partial<IUser>> = {};
 
         if (registrationDateFrom || registrationDateTo) {
@@ -65,6 +62,7 @@ export const getCustomers = async (
                 filters.createdAt.$lte = endOfDay;
             }
         }
+
         if (lastOrderDateFrom || lastOrderDateTo) {
             filters.lastOrderDate = {};
             if (lastOrderDateFrom) filters.lastOrderDate.$gte = lastOrderDateFrom;
@@ -74,57 +72,61 @@ export const getCustomers = async (
                 filters.lastOrderDate.$lte = endOfDay;
             }
         }
+
         if (totalAmountFrom !== undefined || totalAmountTo !== undefined) {
             filters.totalAmount = {};
             if (totalAmountFrom !== undefined) filters.totalAmount.$gte = totalAmountFrom;
             if (totalAmountTo !== undefined) filters.totalAmount.$lte = totalAmountTo;
         }
+
         if (orderCountFrom !== undefined || orderCountTo !== undefined) {
             filters.orderCount = {};
             if (orderCountFrom !== undefined) filters.orderCount.$gte = orderCountFrom;
             if (orderCountTo !== undefined) filters.orderCount.$lte = orderCountTo;
         }
 
+        // Безопасный RegExp поиск
         if (search && typeof search === 'string' && search.length <= 50) {
-            const searchRegex = new RegExp(search, 'i')
+            let searchRegex: RegExp;
+            try {
+                searchRegex = new RegExp(search, 'i');
+            } catch {
+                throw new BadRequestError('Некорректный поисковый запрос');
+            }
 
             const orders = await Order.find(
-                {
-                    $or: [{ deliveryAddress: searchRegex }],
-                },
-                    '_id'
-            )
+                { $or: [{ deliveryAddress: searchRegex }] },
+                '_id'
+            );
 
             const orderIds = orders.map((order) => order._id);
 
-            filters.$or = [{ name: searchRegex }, { lastOrder: { $in: orderIds } }]
-
+            filters.$or = [
+                { name: searchRegex },
+                { lastOrder: { $in: orderIds } }
+            ];
         }
 
-        // Сортировка
         const sort: { [key: string]: 1 | -1 } = {};
         sort[safeSortField] = sortOrder === 'desc' ? -1 : 1;
 
-        // Опции запроса
         const options = {
             sort,
             skip: (page - 1) * limit,
             limit,
         };
 
-        // Получаем пользователей с популяцией
         const users = await User.find(filters, null, options).populate([
-        'orders',
+            'orders',
             {
                 path: 'lastOrder',
                 populate: ['products', 'customer'],
             },
-        ])
+        ]);
 
         const totalUsers = await User.countDocuments(filters);
         const totalPages = Math.ceil(totalUsers / limit);
 
-        // Формируем ответ с выборкой полей (как во втором варианте)
         const customers = users.map((u) => ({
             _id: u._id,
             name: u.name,
