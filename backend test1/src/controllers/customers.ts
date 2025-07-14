@@ -30,8 +30,8 @@ export const getCustomers = async (
     next: NextFunction
 ) => {
     try {
-        // // Санитизируем query
-        // const sanitizedQuery = sanitizeObject(req.query);
+        // Санитизируем query
+        const sanitizedObject = sanitizeObject(req.body);
 
         // Нормализуем параметры с дополнительной валидацией
         const {
@@ -48,7 +48,7 @@ export const getCustomers = async (
             orderCountFrom,
             orderCountTo,
             search,
-        } = normalizeCustomerQueryParams(req.body, 10);
+        } = normalizeCustomerQueryParams(sanitizedObject, 10);
 
         // Проверка sortField на разрешённые поля
         const allowedSortFields = ['createdAt', 'totalAmount', 'orderCount', 'name'];
