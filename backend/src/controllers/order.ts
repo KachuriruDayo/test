@@ -276,65 +276,78 @@ export const createOrder = async (
     req: Request,
     res: Response,
     next: NextFunction
-  ) => {
+) => {
     try {
-      const basket: IProduct[] = []
-      const products = await Product.find<IProduct>({})
-      const userId = res.locals.user._id
-      const {
-        address = '',
-        payment = '',
-        phone = '',
-        total,
-        email = '',
-        items,
-        comment = '',
-      } = req.body
-  
-      const normalizedPhone = phone.replace(/\D/g, '')
-  
-      if (!Array.isArray(items)) {
-        return next(new BadRequestError('Поле items должно быть массивом'))
-      }
-  
-      items.forEach((id: Types.ObjectId) => {
-        const product = products.find((p) =>
-          (p._id as Types.ObjectId).equals(id)
-        )
-        if (!product) {
-          throw new BadRequestError(`Товар с id ${id} не найден`)
+        const userId = res.locals.user._id
+        const {
+            address = '',
+            payment = '',
+            phone = '',
+            total,
+            email = '',
+            items,
+            comment = '',
+        } = req.body
+
+        if (!Array.isArray(items)) {
+            return next(new BadRequestError('Поле items должно быть массивом'))
         }
-        if (product.price === null) {
-          throw new BadRequestError(`Товар с id ${id} не продается`)
+
+        // Получаем все продукты из БД (можно оптимизировать запрос, но пока так)
+        const products = await Product.find<IProduct>({})
+
+        // Собираем корзину
+        const basket: IProduct[] = []
+
+        items.forEach((id: Types.ObjectId) => {
+            const product = products.find((p) => p._id.equals(id))
+            if (!product) {
+                throw new BadRequestError(`Товар с id ${id} не найден`)
+            }
+            if (product.price === null) {
+                throw new BadRequestError(`Товар с id ${id} не продается`)
+            }
+            basket.push(product)
+        })
+
+        // Проверяем сумму
+        const totalBasket = basket.reduce((sum, product) => sum + product.price, 0)
+        if (totalBasket !== total) {
+            return next(new BadRequestError('Неверная сумма заказа'))
         }
-        basket.push(product)
-      })
-  
-      const totalBasket = basket.reduce((a, c) => a + c.price, 0)
-      if (totalBasket !== total) {
-        return next(new BadRequestError('Неверная сумма заказа'))
-      }
-  
-      const newOrder = new Order({
-        totalAmount: total,
-        products: items,
-        payment: escape(payment).slice(0, 50),
-        phone: normalizedPhone,
-        email: escape(email).slice(0, 100),
-        comment: escape(comment).slice(0, 1000),
-        customer: userId,
-        deliveryAddress: escape(address).slice(0, 200),
-      })
-  
-      const populatedOrder = await newOrder.populate(['customer', 'products'])
-      await populatedOrder.save()
-  
-      return res.status(200).json(populatedOrder)
+
+        // Нормализация телефона с проверкой
+        const normalizedPhone = normalizePhone(phone, 'RU')
+        if (!normalizedPhone) {
+            return next(new BadRequestError('Некорректный номер телефона'))
+        }
+
+        // Функция для безопасной санитизации и ограничения длины
+        const sanitizeAndTrim = (input: string, maxLength: number) =>
+            sanitizeHtml(input).slice(0, maxLength)
+
+        // Создаем заказ
+        const newOrder = new Order({
+            totalAmount: total,
+            products: items,
+            payment: sanitizeAndTrim(payment, 50),
+            phone: normalizedPhone,
+            email: sanitizeAndTrim(email, 100),
+            comment: sanitizeAndTrim(comment, 1000),
+            customer: userId,
+            deliveryAddress: sanitizeAndTrim(address, 200),
+        })
+
+        // Заполняем связи и сохраняем
+        const populatedOrder = await newOrder.populate(['customer', 'products'])
+        await populatedOrder.save()
+
+        return res.status(200).json(populatedOrder)
     } catch (error) {
-      if (error instanceof MongooseError.ValidationError) {
-        return next(new BadRequestError(error.message))
-      }
-      return next(error)
+        if (error instanceof MongooseError.ValidationError) {
+            return next(new BadRequestError(error.message))
+        }
+        return next(error)
     }
 }
   
