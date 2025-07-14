@@ -86,18 +86,21 @@ export const getCustomers = async (
             if (orderCountTo !== undefined) filters.orderCount.$lte = orderCountTo;
         }
 
-        // Поиск по имени и заказам
         if (search && typeof search === 'string' && search.length <= 50) {
-            const safeSearch = escapeRegExp(search);
-            const searchRegex = new RegExp(safeSearch, 'i');
+            const safeSearch = escapeRegExp(search)
+            const searchRegex = new RegExp(safeSearch, 'i')
 
-            const orders = await Order.find({ deliveryAddress: searchRegex }, '_id').exec();
+            const orders = await Order.find(
+                {
+                    $or: [{ deliveryAddress: searchRegex }],
+                },
+                    '_id'
+            )
+
             const orderIds = orders.map((order) => order._id);
 
-            filters.$or = [
-                { name: searchRegex },
-                { lastOrder: { $in: orderIds } },
-            ];
+            filters.$or = [{ name: searchRegex }, { lastOrder: { $in: orderIds } }]
+
         } else {
             return next(new NotFoundError('Недопустимый параметр поиска'));
         }
@@ -114,15 +117,13 @@ export const getCustomers = async (
         };
 
         // Получаем пользователей с популяцией
-        const users = await User.find(filters, null, options)
-            .populate([
-                'orders',
-                {
-                    path: 'lastOrder',
-                    populate: ['products', 'customer'],
-                },
-            ])
-            .exec();
+        const users = await User.find(filters, null, options).populate([
+        'orders',
+            {
+                path: 'lastOrder',
+                populate: ['products', 'customer'],
+            },
+        ])
 
         const totalUsers = await User.countDocuments(filters);
         const totalPages = Math.ceil(totalUsers / limit);
