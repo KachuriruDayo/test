@@ -5,162 +5,149 @@ import NotFoundError from '../errors/not-found-error'
 import Order, { IOrder } from '../models/order'
 import Product, { IProduct } from '../models/product'
 import User from '../models/user'
+import { sanitizeHtml } from "../middlewares/sanitize";
+import escapeRegExp from "../utils/escapeRegExp";
+import { normalizeLimit, normalizePhone, normalizeOrderQueryParams } from "../utils/parseQueryParams";
 
 // GET /orders (admin)
 export const getOrders = async (
     req: Request,
     res: Response,
     next: NextFunction
-  ) => {
+) => {
     try {
-      const {
-        page = 1,
-        limit = 10,
-        sortField = 'createdAt',
-        sortOrder = 'desc',
-        status,
-        totalAmountFrom,
-        totalAmountTo,
-        orderDateFrom,
-        orderDateTo,
-        search,
-      } = req.query
-  
-      const correctLimit = Math.min(Number(limit), 5).toString()
-      const filters: FilterQuery<Partial<IOrder>> = {}
-  
-      if (status) {
-        if (typeof status === 'string' && /^[a-zA-Z0-9_-]+$/.test(status)) {
-          filters.status = status
-        } else {
-          throw new BadRequestError('Передан невалидный параметр статуса')
+        const {
+            page = 1,
+            limit = 10,
+            sortField = 'createdAt',
+            sortOrder = 'desc',
+            status,
+            totalAmountFrom,
+            totalAmountTo,
+            orderDateFrom,
+            orderDateTo,
+            search,
+        } = normalizeOrderQueryParams(req.query, 10)
+
+        const filters: FilterQuery<Partial<IOrder>> = {}
+
+        if (status) {
+            if (typeof status === 'string' && /^[a-zA-Z0-9_-]+$/.test(status)) {
+                filters.status = status
+            } else {
+                throw new BadRequestError('Передан невалидный параметр статуса')
+            }
         }
-      }
-  
-      if (search) {
-        if (/[^\w\s]/.test(search as string)) {
-          throw new BadRequestError('Передан невалидный поисковый запрос')
+
+        if (search) {
+            if (/[^\w\s]/.test(search as string)) {
+                throw new BadRequestError('Передан невалидный поисковый запрос')
+            }
         }
-      }
-  
-      if (status) {
-        if (typeof status === 'object') {
-          Object.assign(filters, status)
+
+        if (status) {
+            if (typeof status === 'object') {
+                Object.assign(filters, status)
+            }
+            if (typeof status === 'string') {
+                filters.status = status
+            }
         }
-        if (typeof status === 'string') {
-          filters.status = status
+
+        if (totalAmountFrom !== undefined || totalAmountTo !== undefined) {
+            filters.totalAmount = {};
+            if (totalAmountFrom !== undefined) filters.totalAmount.$gte = totalAmountFrom;
+            if (totalAmountTo !== undefined) filters.totalAmount.$lte = totalAmountTo;
         }
-      }
-  
-      if (totalAmountFrom) {
-        filters.totalAmount = {
-          ...filters.totalAmount,
-          $gte: Number(totalAmountFrom),
+
+        if (orderDateFrom !== undefined || orderDateTo !== undefined) {
+            filters.createdAt = {};
+            if (orderDateFrom !== undefined) filters.createdAt.$gte = orderDateFrom;
+            if (orderDateTo !== undefined) filters.createdAt.$lte = orderDateTo;
         }
-      }
-  
-      if (totalAmountTo) {
-        filters.totalAmount = {
-          ...filters.totalAmount,
-          $lte: Number(totalAmountTo),
+
+        const aggregatePipeline: any[] = [
+            { $match: filters },
+            {
+                $lookup: {
+                    from: 'products',
+                    localField: 'products',
+                    foreignField: '_id',
+                    as: 'products',
+                },
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'customer',
+                    foreignField: '_id',
+                    as: 'customer',
+                },
+            },
+            { $unwind: '$customer' },
+            { $unwind: '$products' },
+        ]
+
+        if (search) {
+            const safeSearch = escapeRegExp(search as string)
+            const searchRegex = new RegExp(safeSearch, 'i')
+            const searchNumber = Number(search)
+
+            const searchConditions: any[] = [{ 'products.title': searchRegex }]
+
+            if (!Number.isNaN(searchNumber)) {
+                searchConditions.push({ orderNumber: searchNumber })
+            }
+
+            aggregatePipeline.push({
+                $match: {
+                    $or: searchConditions,
+                },
+            })
+
+            filters.$or = searchConditions
         }
-      }
-  
-      if (orderDateFrom) {
-        filters.createdAt = {
-          ...filters.createdAt,
-          $gte: new Date(orderDateFrom as string),
+
+        const sort: { [key: string]: any } = {}
+
+        if (sortField && sortOrder) {
+            sort[sortField as string] = sortOrder === 'desc' ? -1 : 1
         }
-      }
-  
-      if (orderDateTo) {
-        filters.createdAt = {
-          ...filters.createdAt,
-          $lte: new Date(orderDateTo as string),
-        }
-      }
-  
-      const aggregatePipeline: any[] = [
-        { $match: filters },
-        {
-          $lookup: {
-            from: 'products',
-            localField: 'products',
-            foreignField: '_id',
-            as: 'products',
-          },
-        },
-        {
-          $lookup: {
-            from: 'users',
-            localField: 'customer',
-            foreignField: '_id',
-            as: 'customer',
-          },
-        },
-        { $unwind: '$customer' },
-        { $unwind: '$products' },
-      ]
-  
-      if (search) {
-        const searchRegex = new RegExp(search as string, 'i')
-        const searchNumber = Number(search)
-  
-        const searchConditions: any[] = [{ 'products.title': searchRegex }]
-  
-        if (!Number.isNaN(searchNumber)) {
-          searchConditions.push({ orderNumber: searchNumber })
-        }
-  
-        aggregatePipeline.push({
-          $match: {
-            $or: searchConditions,
-          },
+
+        aggregatePipeline.push(
+            { $sort: sort },
+            { $skip: (page - 1) * limit },
+            { $limit: limit},
+            {
+                $group: {
+                    _id: '$_id',
+                    orderNumber: { $first: '$orderNumber' },
+                    status: { $first: '$status' },
+                    totalAmount: { $first: '$totalAmount' },
+                    products: { $push: '$products' },
+                    customer: { $first: '$customer' },
+                    createdAt: { $first: '$createdAt' },
+                },
+            }
+        )
+
+        const orders = await Order.aggregate(aggregatePipeline)
+        const totalOrders = await Order.countDocuments(filters)
+        const totalPages = Math.ceil(totalOrders / limit)
+
+        res.status(200).json({
+            orders,
+            pagination: {
+                totalOrders,
+                totalPages,
+                currentPage: page,
+                pageSize: limit,
+            },
         })
-  
-        filters.$or = searchConditions
-      }
-  
-      const sort: { [key: string]: any } = {}
-  
-      if (sortField && sortOrder) {
-        sort[sortField as string] = sortOrder === 'desc' ? -1 : 1
-      }
-  
-      aggregatePipeline.push(
-        { $sort: sort },
-        { $skip: (Number(page) - 1) * Number(correctLimit) },
-        { $limit: Number(correctLimit) },
-        {
-          $group: {
-            _id: '$_id',
-            orderNumber: { $first: '$orderNumber' },
-            status: { $first: '$status' },
-            totalAmount: { $first: '$totalAmount' },
-            products: { $push: '$products' },
-            customer: { $first: '$customer' },
-            createdAt: { $first: '$createdAt' },
-          },
-        }
-      )
-  
-      const orders = await Order.aggregate(aggregatePipeline)
-      const totalOrders = await Order.countDocuments(filters)
-      const totalPages = Math.ceil(totalOrders / Number(correctLimit))
-  
-      res.status(200).json({
-        orders,
-        pagination: {
-          totalOrders,
-          totalPages,
-          currentPage: Number(page),
-          pageSize: Number(correctLimit),
-        },
-      })
     } catch (error) {
-      next(error)
+        next(error)
     }
-  }  
+} 
       
   export const getOrdersCurrentUser = async (
     req: Request,
