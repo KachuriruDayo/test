@@ -85,7 +85,6 @@ export const getCustomers = async (
             if (orderCountTo !== undefined) filters.orderCount.$lte = orderCountTo;
         }
 
-        // Безопасный RegExp поиск
         if (search && typeof search === 'string' && search.length <= 50) {
             const safeSearch = escapeRegExp(search)
             const searchRegex = new RegExp(safeSearch, 'i')
