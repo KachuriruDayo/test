@@ -3,7 +3,6 @@ import { FilterQuery, Types } from 'mongoose'
 import NotFoundError from '../errors/not-found-error'
 import Order from '../models/order'
 import User, { IUser } from '../models/user'
-import escapeRegExp from "../utils/escapeRegExp";
 import { normalizeCustomerQueryParams } from "../utils/parseQueryParams";
 
 // --- Вспомогательные функции ---
@@ -31,7 +30,7 @@ export const getCustomers = async (
 ) => {
     try {
         // Санитизируем query
-        const sanitizedObject = sanitizeObject(req.body);
+        const sanitizedObject = sanitizeObject(req.query);
 
         // Нормализуем параметры с дополнительной валидацией
         const {
@@ -87,8 +86,7 @@ export const getCustomers = async (
         }
 
         if (search && typeof search === 'string' && search.length <= 50) {
-            const safeSearch = escapeRegExp(search)
-            const searchRegex = new RegExp(safeSearch, 'i')
+            const searchRegex = new RegExp(search, 'i')
 
             const orders = await Order.find(
                 {
@@ -101,8 +99,6 @@ export const getCustomers = async (
 
             filters.$or = [{ name: searchRegex }, { lastOrder: { $in: orderIds } }]
 
-        } else {
-            return next(new NotFoundError('Недопустимый параметр поиска'));
         }
 
         // Сортировка

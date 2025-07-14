@@ -98,14 +98,18 @@ const parseSortOrder = (value?: string, defaultValue: "asc" | "desc" = "desc"): 
 };
 
 const sanitizeSearch = (value?: string): string | undefined => {
-    if (!value) return undefined;
-    const trimmed = value.trim();
-    if (trimmed.length === 0) return undefined;
-    const allowedPattern = /^[a-zA-Z0-9\s\-_.]+$/;
-    if (!allowedPattern.test(trimmed)) throw new BadRequestError("Поисковый запрос содержит недопустимые символы");
-    // Экранирование спецсимволов для RegExp
-    return trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+
+  const allowed = /^[a-zA-Z0-9\s\-_.+%]+$/;
+  if (!allowed.test(trimmed)) {
+    throw new BadRequestError('Поисковый запрос содержит недопустимые символы');
+  }
+
+  return trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
+
 
 export const normalizeLimit = (limitQuery: unknown, defaultLim: number): number => {
     let limitStr = "";
